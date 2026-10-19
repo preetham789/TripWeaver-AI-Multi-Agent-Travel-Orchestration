@@ -441,4 +441,4 @@ python -m py_compile app.py backend.py mcp_client.py custom_weather_mcp.py
 
 ## License
 
-Copyright © 2026 Preetham P. Distributed under the [MIT License](LICENSE).
+Copyright © 2026 Preetham P. Distributed under the [MIT License](LICENSE)..
