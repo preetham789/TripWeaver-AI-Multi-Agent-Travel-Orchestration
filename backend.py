@@ -1,4 +1,5 @@
 import os
+import time
 import certifi
 from dotenv import load_dotenv
 
@@ -64,6 +65,44 @@ llm = ChatGroq(
     api_key=GROQ_API_KEY,
 )
 
+
+def _llm_invoke_with_retry(messages, max_retries: int = 4):
+    """
+    Invoke the LLM with exponential-backoff retry on Groq 429 rate-limit errors.
+
+    Groq's free tier has a tight TPM (tokens-per-minute) cap.  When a 429 is
+    returned the response body contains the number of seconds to wait, e.g.:
+        "Please try again in 32.93s"
+    We parse that value and sleep for it (plus a small jitter) before retrying.
+    If parsing fails we fall back to: 15 s, 30 s, 60 s, 120 s.
+    """
+    import re
+
+    fallback_delays = [15, 30, 60, 120]
+
+    for attempt in range(max_retries + 1):
+        try:
+            return llm.invoke(messages)
+        except Exception as exc:
+            err_str = str(exc)
+            is_rate_limit = "429" in err_str or "rate_limit_exceeded" in err_str
+
+            if not is_rate_limit or attempt == max_retries:
+                raise
+
+            # Try to extract the exact wait time Groq tells us
+            match = re.search(r"try again in\s+([\d.]+)s", err_str, re.IGNORECASE)
+            if match:
+                wait = float(match.group(1)) + 2.0  # small buffer
+            else:
+                wait = fallback_delays[min(attempt, len(fallback_delays) - 1)]
+
+            print(
+                f"[Rate limit] Groq 429 â€” waiting {wait:.1f}s before retry "
+                f"(attempt {attempt + 1}/{max_retries}) â€¦"
+            )
+            time.sleep(wait)
+
 # =========================
 # State - original fields kept, new control fields added
 # =========================
@@ -115,7 +154,7 @@ AGENT_ORDER = [
 
 
 def _llm_text(system_prompt: str, user_prompt: str) -> str:
-    response = llm.invoke(
+    response = _llm_invoke_with_retry(
         [
             SystemMessage(content=system_prompt),
             HumanMessage(content=user_prompt),
@@ -345,7 +384,7 @@ def flight_agent(state: TravelState):
             airline_data=_limit_context(airlines, 1500),
         )
 
-        response = llm.invoke(
+        response = _llm_invoke_with_retry(
             [
                 SystemMessage(content="You are an expert travel flight planner."),
                 HumanMessage(content=prompt),
@@ -487,7 +526,7 @@ Return:
 If exact live prices are unavailable, clearly label estimates as approximate.
 """
 
-    response = llm.invoke(
+    response = _llm_invoke_with_retry(
         [
             SystemMessage(content="You are a practical travel budget analyst."),
             HumanMessage(content=prompt),
@@ -530,7 +569,7 @@ Make the itinerary practical, budget-aware, and easy to follow.
 Create a clear draft that is ready for human review.
 """
 
-    response = llm.invoke(
+    response = _llm_invoke_with_retry(
         [
             SystemMessage(content="You are an expert travel planner."),
             HumanMessage(content=prompt),
@@ -625,7 +664,7 @@ Important:
 - Incorporate the human feedback when revision was requested.
 """
 
-    response = llm.invoke(
+    response = _llm_invoke_with_retry(
         [
             SystemMessage(
                 content="You are a professional AI travel booking assistant."
