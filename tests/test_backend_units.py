@@ -99,6 +99,21 @@ class TestLimitContext:
 
 
 @skip_if_no_backend
+class TestRequestedTripDays:
+    @pytest.mark.parametrize(
+        ("query", "expected"),
+        [
+            ("Plan a 7-day Japan trip.", 7),
+            ("Plan a trip for five days.", 5),
+            ("Plan a two week trip.", 14),
+            ("Plan a trip to Japan.", None),
+        ],
+    )
+    def test_extracts_trip_length(self, query, expected):
+        assert real_backend._requested_trip_days(query) == expected
+
+
+@skip_if_no_backend
 class TestJsonFromLlm:
     def test_valid_json_extracted(self):
         raw = 'Some text {"allowed": true, "reason": ""} extra'
@@ -460,6 +475,20 @@ class TestGuardrailAndSupervisor:
         result = real_backend.supervisor_agent(self._make_state("Book me a flight to Paris."))
         assert "itinerary_agent" in result["selected_agents"]
 
+    def test_supervisor_preserves_explicit_trip_duration(self):
+        real_backend.llm.invoke = MagicMock(side_effect=[
+            MagicMock(content='{"allowed": true, "reason": ""}'),
+            MagicMock(content=json.dumps({
+                "selected_agents": ["itinerary_agent"],
+                "trip_constraints": {"duration": ""},
+                "reasoning": "",
+            })),
+        ])
+        result = real_backend.supervisor_agent(
+            self._make_state("Plan a complete 7 days trip to Japan.")
+        )
+        assert result["trip_constraints"]["duration"] == "7 days"
+
     def test_supervisor_increments_llm_calls(self):
         real_backend.llm.invoke = MagicMock(side_effect=[
             MagicMock(content='{"allowed": true, "reason": ""}'),
@@ -471,6 +500,35 @@ class TestGuardrailAndSupervisor:
         ])
         result = real_backend.supervisor_agent(self._make_state("Plan a trip."))
         assert result["llm_calls"] == 2  # guardrail + supervisor
+
+    def test_itinerary_prompt_requires_every_requested_day(self):
+        real_backend.llm.invoke = MagicMock(
+            return_value=MagicMock(content="Day 1 ... Day 7")
+        )
+        real_backend.itinerary_agent({
+            "user_query": "Plan a 7-day trip to Japan.",
+            "trip_constraints": {"duration": "7 days"},
+        })
+        prompt = real_backend.llm.invoke.call_args.args[0][1].content
+        assert "Day 1, Day 2, Day 3, Day 4, Day 5, Day 6, Day 7" in prompt
+        assert "Do not omit, combine, or summarize any days." in prompt
+
+    def test_final_response_preserves_all_days_from_full_draft(self):
+        draft = "Day 1 " + ("activities " * 300) + "Day 7"
+        real_backend.llm.invoke = MagicMock(
+            return_value=MagicMock(content="Polished plan")
+        )
+        real_backend.final_agent({
+            "user_query": "Plan a complete 7-day trip to Japan.",
+            "trip_constraints": {"duration": "7 days"},
+            "itinerary": draft,
+            "approved": True,
+        })
+        prompt = real_backend.llm.invoke.call_args.args[0][1].content
+        assert draft in prompt
+        assert "Day 1, Day 2, Day 3, Day 4, Day 5, Day 6, Day 7" in prompt
+        assert "Do not shorten, remove," in prompt
+        assert "combine, or summarize its day-by-day sections." in prompt
 
     def test_guardrail_blocked_agent_uses_final_response(self):
         state = {"final_response": "Blocked!", "guardrail_reason": ""}
@@ -512,3 +570,12 @@ class TestDatabaseUrlConfig:
         url = real_backend.get_database_url()
         assert "sslmode=require" in url
         assert "&sslmode=require" in url
+
+
+@skip_if_no_backend
+class TestGroqModelConfig:
+    def test_uses_configured_model(self):
+        assert real_backend.GROQ_MODEL == os.getenv(
+            "GROQ_MODEL",
+            "openai/gpt-oss-120b",
+        )

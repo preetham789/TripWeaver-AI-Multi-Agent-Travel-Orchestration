@@ -216,6 +216,11 @@ class TestGetForecast:
 # ─────────────────────────────────────────────────────────────────────────────
 
 class TestMCPClientSubprocessEnv:
+    def test_weather_server_path_exists(self):
+        import mcp_client as mc
+        assert mc.WEATHER_SERVER_PATH == ROOT / "custom_weather_mcp.py"
+        assert mc.WEATHER_SERVER_PATH.is_file()
+
     def test_preserves_path_variable(self):
         import mcp_client as mc
         env = mc._subprocess_env()

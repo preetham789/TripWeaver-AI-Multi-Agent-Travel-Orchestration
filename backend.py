@@ -1,5 +1,4 @@
 import os
-import time
 import certifi
 from dotenv import load_dotenv
 
@@ -12,6 +11,7 @@ import operator
 import uuid
 import asyncio
 import json
+import re
 import psycopg
 from psycopg.rows import dict_row
 from langgraph.graph import StateGraph, START, END
@@ -63,45 +63,8 @@ if not GROQ_API_KEY:
 llm = ChatGroq(
     model=GROQ_MODEL,
     api_key=GROQ_API_KEY,
+    max_tokens=3000,
 )
-
-
-def _llm_invoke_with_retry(messages, max_retries: int = 4):
-    """
-    Invoke the LLM with exponential-backoff retry on Groq 429 rate-limit errors.
-
-    Groq's free tier has a tight TPM (tokens-per-minute) cap.  When a 429 is
-    returned the response body contains the number of seconds to wait, e.g.:
-        "Please try again in 32.93s"
-    We parse that value and sleep for it (plus a small jitter) before retrying.
-    If parsing fails we fall back to: 15 s, 30 s, 60 s, 120 s.
-    """
-    import re
-
-    fallback_delays = [15, 30, 60, 120]
-
-    for attempt in range(max_retries + 1):
-        try:
-            return llm.invoke(messages)
-        except Exception as exc:
-            err_str = str(exc)
-            is_rate_limit = "429" in err_str or "rate_limit_exceeded" in err_str
-
-            if not is_rate_limit or attempt == max_retries:
-                raise
-
-            # Try to extract the exact wait time Groq tells us
-            match = re.search(r"try again in\s+([\d.]+)s", err_str, re.IGNORECASE)
-            if match:
-                wait = float(match.group(1)) + 2.0  # small buffer
-            else:
-                wait = fallback_delays[min(attempt, len(fallback_delays) - 1)]
-
-            print(
-                f"[Rate limit] Groq 429 â€” waiting {wait:.1f}s before retry "
-                f"(attempt {attempt + 1}/{max_retries}) â€¦"
-            )
-            time.sleep(wait)
 
 # =========================
 # State - original fields kept, new control fields added
@@ -154,7 +117,7 @@ AGENT_ORDER = [
 
 
 def _llm_text(system_prompt: str, user_prompt: str) -> str:
-    response = _llm_invoke_with_retry(
+    response = llm.invoke(
         [
             SystemMessage(content=system_prompt),
             HumanMessage(content=user_prompt),
@@ -164,11 +127,48 @@ def _llm_text(system_prompt: str, user_prompt: str) -> str:
 
 
 def _limit_context(value: Any, max_chars: int) -> str:
-    text = str(value)
+    """Keep tool and agent context from overwhelming subsequent model calls."""
+    text = str(value or "")
     if len(text) <= max_chars:
         return text
+    return f"{text[:max_chars]}\n[Context truncated]"
 
-    return f"{text[:max_chars].rstrip()}\n[Context truncated]"
+
+def _requested_trip_days(query: str, duration: Any = "") -> int | None:
+    """Find an explicit trip length so itinerary generation doesn't rely on inference."""
+    number_words = {
+        "one": 1,
+        "two": 2,
+        "three": 3,
+        "four": 4,
+        "five": 5,
+        "six": 6,
+        "seven": 7,
+        "eight": 8,
+        "nine": 9,
+        "ten": 10,
+        "eleven": 11,
+        "twelve": 12,
+        "thirteen": 13,
+        "fourteen": 14,
+    }
+    text = f"{query} {duration or ''}".lower()
+    numeric_match = re.search(r"\b(\d{1,2})\s*[- ]?\s*days?\b", text)
+    if numeric_match:
+        days = int(numeric_match.group(1))
+        return days if 1 <= days <= 30 else None
+
+    word_pattern = "|".join(number_words)
+    word_match = re.search(rf"\b({word_pattern})\s*[- ]?\s*days?\b", text)
+    if word_match:
+        return number_words[word_match.group(1)]
+
+    week_match = re.search(r"\b(1|one|2|two)\s*[- ]?\s*weeks?\b", text)
+    if week_match:
+        weeks = {"1": 1, "one": 1, "2": 2, "two": 2}[week_match.group(1)]
+        return weeks * 7
+
+    return None
 
 
 def _json_from_llm(text: str) -> dict[str, Any]:
@@ -197,7 +197,7 @@ def _empty_constraints() -> dict[str, Any]:
 # Supervisor Agent + Input Guardrail
 # =========================
 def supervisor_agent(state: TravelState):
-    query = _limit_context(state["user_query"], 4000)
+    query = _limit_context(state["user_query"], 1600)
     llm_calls = state.get("llm_calls", 0)
 
     guardrail_prompt = f"""
@@ -302,6 +302,9 @@ User request:
         parsed_constraints = parsed.get("trip_constraints", {})
         if isinstance(parsed_constraints, dict):
             constraints.update(parsed_constraints)
+        requested_days = _requested_trip_days(query)
+        if requested_days is not None:
+            constraints["duration"] = f"{requested_days} days"
 
         reasoning = str(parsed.get("reasoning", "")).strip()
         llm_calls += 1
@@ -369,7 +372,7 @@ Return concise travel guidance.
 
 def flight_agent(state: TravelState):
     print("\nINSIDE FLIGHT AGENT\n")
-    query = _limit_context(state["user_query"], 2000)
+    query = state["user_query"]
 
     try:
         airports = asyncio.run(aviation_mcp_call("list_airports"))
@@ -379,12 +382,12 @@ def flight_agent(state: TravelState):
         print("\nAIRLINES:", airlines)
 
         prompt = FLIGHT_AGENT_PROMPT.format(
-            query=query,
-            airport_data=_limit_context(airports, 1500),
-            airline_data=_limit_context(airlines, 1500),
+            query=_limit_context(query, 1600),
+            airport_data=_limit_context(airports, 700),
+            airline_data=_limit_context(airlines, 700),
         )
 
-        response = _llm_invoke_with_retry(
+        response = llm.invoke(
             [
                 SystemMessage(content="You are an expert travel flight planner."),
                 HumanMessage(content=prompt),
@@ -407,13 +410,12 @@ def flight_agent(state: TravelState):
 def hotel_agent(state: TravelState):
     query = (
         f"Best hotels for "
-        f"{_limit_context(state['user_query'], 2000)}"
+        f"{_limit_context(state['user_query'], 1600)}"
     )
 
     try:
-        hotel_results = _limit_context(
-            asyncio.run(tavily_mcp_search(query)),
-            4000,
+        hotel_results = asyncio.run(
+            tavily_mcp_search(query)
         )
 
     except Exception as exc:
@@ -431,7 +433,7 @@ def hotel_agent(state: TravelState):
         )
 
     return {
-        "hotel_results": hotel_results,
+        "hotel_results": _limit_context(hotel_results, 1400),
         "messages": [
             AIMessage(
                 content="Hotel information processed."
@@ -448,7 +450,7 @@ def hotel_agent(state: TravelState):
 # =========================
 def weather_agent(state: TravelState):
     city = extract_destination(
-        state["user_query"]
+        _limit_context(state["user_query"], 1600)
     )
 
     try:
@@ -460,16 +462,13 @@ def weather_agent(state: TravelState):
             forecast_mcp_search(city)
         )
 
-        weather_results = _limit_context(
-            f"""
+        weather_results = f"""
 Current Weather:
 {weather_data}
 
 Forecast:
 {forecast_data}
-""",
-            2000,
-        )
+"""
 
     except Exception as exc:
         print(
@@ -486,7 +485,7 @@ Forecast:
         )
 
     return {
-        "weather_results": weather_results,
+        "weather_results": _limit_context(weather_results, 1200),
         "messages": [
             AIMessage(
                 content="Weather information processed."
@@ -503,19 +502,19 @@ def budget_agent(state: TravelState):
 Analyze whether this trip is realistic for the user's budget.
 
 User Query:
-{_limit_context(state['user_query'], 2000)}
+{_limit_context(state['user_query'], 1600)}
 
 Trip Constraints:
-{_limit_context(state.get('trip_constraints', {}), 1000)}
+{_limit_context(state.get('trip_constraints', {}), 500)}
 
 Flight Results:
-{_limit_context(state.get('flight_results', ''), 1500)}
+{_limit_context(state.get('flight_results', ''), 900)}
 
 Hotel Results:
-{_limit_context(state.get('hotel_results', ''), 2500)}
+{_limit_context(state.get('hotel_results', ''), 900)}
 
 Weather Results:
-{_limit_context(state.get('weather_results', ''), 1500)}
+{_limit_context(state.get('weather_results', ''), 700)}
 
 Return:
 1. Estimated cost categories
@@ -526,7 +525,7 @@ Return:
 If exact live prices are unavailable, clearly label estimates as approximate.
 """
 
-    response = _llm_invoke_with_retry(
+    response = llm.invoke(
         [
             SystemMessage(content="You are a practical travel budget analyst."),
             HumanMessage(content=prompt),
@@ -544,32 +543,47 @@ If exact live prices are unavailable, clearly label estimates as approximate.
 # Itinerary Agent - original behavior extended with selected results
 # =========================
 def itinerary_agent(state: TravelState):
+    duration = state.get("trip_constraints", {}).get("duration", "")
+    trip_days = _requested_trip_days(state["user_query"], duration)
+    day_count_instruction = (
+        f"The trip is exactly {trip_days} days long. Include a separate, "
+        f"detailed section for every day using these exact headings:\n"
+        f"{', '.join(f'Day {day}' for day in range(1, trip_days + 1))}.\n"
+        "Do not omit, combine, or summarize any days. Give each day multiple "
+        "specific activities and practical details."
+        if trip_days is not None
+        else "Use the requested trip duration and include a separate detailed "
+        "entry for every day; do not omit or combine days."
+    )
     prompt = f"""
 Create a complete travel itinerary.
 
 User Query:
 {_limit_context(state['user_query'], 2000)}
 
+Required day-by-day coverage:
+{day_count_instruction}
+
 Trip Constraints:
-{_limit_context(state.get('trip_constraints', {}), 1000)}
+{_limit_context(state.get('trip_constraints', {}), 500)}
 
 Flight Results:
-{_limit_context(state.get('flight_results', ''), 1500)}
+{_limit_context(state.get('flight_results', ''), 900)}
 
 Hotel Results:
-{_limit_context(state.get('hotel_results', ''), 2000)}
+{_limit_context(state.get('hotel_results', ''), 900)}
 
 Weather Results:
-{_limit_context(state.get('weather_results', ''), 1000)}
+{_limit_context(state.get('weather_results', ''), 700)}
 
 Budget Results:
-{_limit_context(state.get('budget_results', ''), 1500)}
+{_limit_context(state.get('budget_results', ''), 900)}
 
 Make the itinerary practical, budget-aware, and easy to follow.
 Create a clear draft that is ready for human review.
 """
 
-    response = _llm_invoke_with_retry(
+    response = llm.invoke(
         [
             SystemMessage(content="You are an expert travel planner."),
             HumanMessage(content=prompt),
@@ -622,6 +636,17 @@ def human_approval_agent(state: TravelState):
 # Final Response Agent - original format kept, HITL feedback added
 # =========================
 def final_agent(state: TravelState):
+    duration = state.get("trip_constraints", {}).get("duration", "")
+    trip_days = _requested_trip_days(state["user_query"], duration)
+    day_count_instruction = (
+        f"The trip is exactly {trip_days} days. Preserve every detailed day "
+        f"section using these exact headings:\n"
+        f"{', '.join(f'Day {day}' for day in range(1, trip_days + 1))}.\n"
+        "Do not drop, merge, or summarize any day."
+        if trip_days is not None
+        else "Preserve every day of the requested trip in the final response; "
+        "do not drop, merge, or summarize days."
+    )
     if state.get("approved", False):
         review_instruction = (
             "The user approved the draft. Preserve its decisions while polishing it."
@@ -629,42 +654,32 @@ def final_agent(state: TravelState):
     else:
         review_instruction = f"""
 The user requested a revision. Apply this feedback carefully:
-{_limit_context(state.get('human_feedback', '') or 'Improve the draft before finalizing it.', 1000)}
+{_limit_context(state.get('human_feedback', '') or 'Improve the draft before finalizing it.', 900)}
 """
 
     final_prompt = f"""
-Generate the final travel response for the user.
+Polish this travel plan for the user. Keep the summary, flight, hotel, weather,
+budget, and recommendation sections concise so the day-by-day plan receives
+most of the response.
 
-Human Review:
-{review_instruction}
+User request:
+{_limit_context(state['user_query'], 1200)}
 
-User Request:
-{_limit_context(state['user_query'], 2000)}
+Human review:
+{_limit_context(review_instruction, 700)}
 
-Supervisor Constraints:
-{_limit_context(state.get('trip_constraints', {}), 1000)}
+Required day-by-day coverage:
+{day_count_instruction}
 
-Draft Itinerary:
-{_limit_context(state.get('itinerary', ''), 6000)}
+Preserve all useful details from the existing plan. Do not shorten, remove,
+combine, or summarize its day-by-day sections. Ensure the final response has a
+"Day-by-Day Itinerary" section and includes every required day heading above.
 
-Format the final answer beautifully using these sections:
-1. Trip Summary
-2. Flight Information
-3. Hotel Suggestions
-4. Weather Information
-5. Day-by-Day Itinerary
-6. Estimated Budget
-7. Final Recommendations
-
-Important:
-- Be clear and practical.
-- Mention that live flight APIs may not provide ticket prices when pricing is unavailable.
-- Include weather-based travel advice.
-- Keep the response useful for real travel planning.
-- Incorporate the human feedback when revision was requested.
+Existing complete travel plan:
+{_limit_context(state.get('itinerary', ''), 6500)}
 """
 
-    response = _llm_invoke_with_retry(
+    response = llm.invoke(
         [
             SystemMessage(
                 content="You are a professional AI travel booking assistant."

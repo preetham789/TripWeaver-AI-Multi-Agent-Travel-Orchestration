@@ -32,7 +32,7 @@ OPENWEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
 
-WEATHER_SERVER_PATH = BASE_DIR / "custom_weather_mcp_server.py"
+WEATHER_SERVER_PATH = BASE_DIR / "custom_weather_mcp.py"
 UVX_COMMAND = shutil.which("uvx") or "uvx"
 
 
@@ -69,6 +69,7 @@ def _subprocess_env(**updates: str | None) -> dict[str, str]:
 llm = ChatGroq(
     model=GROQ_MODEL,
     api_key=_require_env("GROQ_API_KEY", GROQ_API_KEY),
+    max_tokens=1800,
 )
 
 
@@ -303,7 +304,7 @@ def extract_destination(query: str) -> str:
 Extract only the destination city or country from the travel request.
 
 Travel request:
-{query[:4000]}
+{query[:1600]}
 
 Return only the destination name.
 Do not add any explanation.

@@ -432,7 +432,7 @@ python -m py_compile app.py backend.py mcp_client.py custom_weather_mcp.py
 
 - **Booking**: TripWeaver AI provides planning guidance only. It does not book flights, hotels, or any services, process payments, or guarantee availability.
 - **Pricing accuracy**: AviationStack MCP returns airport and airline context but not live ticket prices. Treat all price estimates as approximate.
-- **Weather server filename**: `mcp_client.py` references `custom_weather_mcp_server.py` — update `WEATHER_SERVER_PATH` to `custom_weather_mcp.py` if the weather agent is not starting.
+- **AviationStack plan**: Some AviationStack MCP tools, including airport and airline lookups, may be unavailable on the current subscription plan. Flight guidance can still be generated, but those lookups require a plan that grants access.
 - **Docker & uv**: The current Dockerfile does not install `uv`. AviationStack MCP (flight research) will be unavailable when running inside the container unless `uv` is added to the image.
 - **External API availability**: A failing MCP integration (Tavily, AviationStack, or OpenWeather) causes only that specialist agent to degrade gracefully — the rest of the pipeline continues.
 - **Fact accuracy**: Visa requirements, opening hours, safety conditions, and prices change frequently. Always verify with official sources before travel.

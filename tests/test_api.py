@@ -78,6 +78,16 @@ class TestStaticAssets:
     def test_static_style_css_exists(self):
         assert (ROOT / "static" / "style.css").is_file()
 
+    def test_static_script_js_is_served(self):
+        response = client.get("/static/script.js")
+        assert response.status_code == 200
+        assert "javascript" in response.headers["content-type"]
+
+    def test_static_style_css_is_served(self):
+        response = client.get("/static/style.css")
+        assert response.status_code == 200
+        assert "text/css" in response.headers["content-type"]
+
     def test_template_index_html_exists(self):
         assert (ROOT / "templates" / "index.html").is_file()
 
@@ -85,6 +95,23 @@ class TestStaticAssets:
         html = (ROOT / "templates" / "index.html").read_text(encoding="utf-8")
         for eid in ("userInput", "sendBtn", "resultSection", "resultBox", "errorBox"):
             assert eid in html, f"Missing id '{eid}'"
+
+    def test_thread_id_is_not_displayed(self):
+        html = (ROOT / "templates" / "index.html").read_text(encoding="utf-8")
+        script = (ROOT / "static" / "script.js").read_text(encoding="utf-8")
+        assert "Thread ID:" not in html
+        assert "threadInfo" not in script
+        assert '/static/script.js?v=2' in html
+        assert 'localStorage.setItem("travel_thread_id", currentThreadId)' in script
+
+    def test_workflow_panel_has_clear_sections(self):
+        html = (ROOT / "templates" / "index.html").read_text(encoding="utf-8")
+        assert "Your trip, coordinated" in html
+        assert "Why this plan" in html
+        assert "Agents on your trip" in html
+        assert 'id="supervisorReasoning"' in html
+        assert 'id="agentChips"' in html
+        assert '/static/style.css?v=3' in html
 
     def test_index_html_references_marked(self):
         assert "marked" in (ROOT / "templates" / "index.html").read_text(encoding="utf-8")
