@@ -1,312 +1,207 @@
-<div align="center">
+# TripWeaver AI
 
-<h1>✈️ TripWeaver AI</h1>
+> A FastAPI web app that turns travel requests into reviewable, multi-agent itineraries. LangGraph coordinates specialists, Groq generates planning guidance, MCP servers supply research, and PostgreSQL persists the human-review workflow.
 
-<p><strong>A production-ready multi-agent travel planning system built with LangGraph, FastAPI, and Groq.</strong></p>
+The repository is called **TripWeaver AI**; the browser interface is branded **TripMate AI**.
 
-<p>
-  <a href="https://www.python.org/"><img alt="Python" src="https://img.shields.io/badge/Python-3.11+-3776AB?style=flat-square&logo=python&logoColor=white"></a>
-  <a href="https://fastapi.tiangolo.com/"><img alt="FastAPI" src="https://img.shields.io/badge/FastAPI-0.136-009688?style=flat-square&logo=fastapi&logoColor=white"></a>
-  <a href="https://langchain-ai.github.io/langgraph/"><img alt="LangGraph" src="https://img.shields.io/badge/LangGraph-1.2-1C3C3C?style=flat-square"></a>
-  <a href="https://groq.com/"><img alt="Groq" src="https://img.shields.io/badge/Groq-LLM-F55036?style=flat-square"></a>
-  <a href="https://www.postgresql.org/"><img alt="PostgreSQL" src="https://img.shields.io/badge/PostgreSQL-Checkpointer-336791?style=flat-square&logo=postgresql&logoColor=white"></a>
-  <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/License-MIT-22C55E?style=flat-square"></a>
-</p>
+![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white) ![FastAPI](https://img.shields.io/badge/FastAPI-0.136-009688?logo=fastapi&logoColor=white) ![LangGraph](https://img.shields.io/badge/LangGraph-1.2-1C3C3C) ![MIT License](https://img.shields.io/badge/License-MIT-22C55E)
 
-<p>
-  Turn any natural-language trip request into a weather-aware, research-backed, budget-conscious itinerary — powered by a supervisor-orchestrated agent pipeline with human-in-the-loop review.
-</p>
-
-</div>
-
----
-
-## Table of Contents
+## Contents
 
 - [Overview](#overview)
-- [Key Features](#key-features)
-- [Architecture](#architecture)
-- [Agent Workflow](#agent-workflow)
-- [Technology Stack](#technology-stack)
-- [Project Structure](#project-structure)
-- [Getting Started](#getting-started)
-  - [Prerequisites](#prerequisites)
-  - [Installation](#installation)
-  - [Configuration](#configuration)
-- [Running the Application](#running-the-application)
-  - [Local Development](#local-development)
-  - [Docker](#docker)
-- [API Reference](#api-reference)
+- [Workflow and architecture](#workflow-and-architecture)
+- [Agents and integrations](#agents-and-integrations)
+- [Guardrails](#guardrails)
+- [Repository layout](#repository-layout)
+- [Prerequisites](#prerequisites)
+- [Install and configure](#install-and-configure)
+- [Run and use the app](#run-and-use-the-app)
+- [API reference](#api-reference)
 - [Testing](#testing)
-- [Known Limitations](#known-limitations)
+- [Docker](#docker)
+- [Operational notes and limitations](#operational-notes-and-limitations)
 - [License](#license)
-
----
 
 ## Overview
 
-TripWeaver AI (branded **TripMate AI** in the web interface) is a full-stack web application that orchestrates a team of specialist AI agents to plan complete trips. A single natural-language prompt — such as *"Plan a 7-day Japan trip from India under ₹2 lakh"* — triggers a supervised pipeline that researches flights, hotels, and live weather before drafting and refining a day-by-day itinerary.
+Ask for a trip in ordinary language:
 
-Workflow state is persisted in **PostgreSQL** via LangGraph's checkpoint system, enabling multi-turn conversations across browser sessions using a stable `thread_id`.
-
----
-
-## Key Features
-
-| Feature | Description |
-|---|---|
-| **Supervisor agent** | Routes each request to only the specialist agents actually needed, based on the query. |
-| **Input guardrail** | Rejects off-topic requests (non-travel content, harmful prompts) before any specialist work begins. |
-| **Human-in-the-loop (HITL)** | The pipeline pauses after the draft itinerary is generated; the user approves or requests a revision before the final polished plan is produced. |
-| **Live flight data** | Airport and airline context via the AviationStack MCP server (launched with `uvx`). |
-| **Live hotel research** | Real-time accommodation search via Tavily's hosted MCP service. |
-| **Live weather** | Current conditions and a 5-entry forecast via a local FastMCP server backed by OpenWeather API. |
-| **Budget analysis** | Dedicated budget agent evaluates cost feasibility and surfaces money-saving suggestions. |
-| **Persistent threads** | LangGraph PostgreSQL checkpointer stores workflow state; the browser saves `thread_id` in `localStorage` for session continuity. |
-| **Markdown export** | Results rendered with `marked.js`; one-click copy or PDF download via `html2pdf.js`. |
-
----
-
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    Browser (HTML / CSS / JS)                 │
-│    Markdown rendering · Copy · PDF export · localStorage     │
-└────────────────────────┬────────────────────────────────────┘
-                         │  POST /api/travel
-                         │  POST /api/travel/approve
-                         ▼
-┌─────────────────────────────────────────────────────────────┐
-│                 FastAPI  (app.py)                            │
-│         Pydantic validation · asyncio.to_thread             │
-└────────────────────────┬────────────────────────────────────┘
-                         │
-                         ▼
-┌─────────────────────────────────────────────────────────────┐
-│              LangGraph Workflow  (backend.py)                │
-│                                                             │
-│  supervisor ──► flight_agent ──► hotel_agent                │
-│                     │                │                      │
-│              AviationStack MCP   Tavily MCP                 │
-│                                   │                         │
-│                         weather_agent                       │
-│                              │                              │
-│                         Weather MCP (local FastMCP)         │
-│                              │                              │
-│                         budget_agent                        │
-│                              │                              │
-│                       itinerary_agent                       │
-│                              │                              │
-│                      human_approval ◄── interrupt()         │
-│                              │                              │
-│                         final_agent                         │
-└──────────────────┬──────────────────────────────────────────┘
-                   │
-                   ▼
-        PostgreSQL  (LangGraph PostgresSaver)
-        Checkpoint storage · thread_id continuity
+```text
+Plan a 7-day Japan trip from Bengaluru under ₹2 lakh with flights, hotels, sightseeing, and packing advice.
 ```
 
----
+TripWeaver screens the request, identifies its constraints, selects the needed travel specialists, produces a day-by-day draft, and pauses for user review. The user can approve the draft or provide revision feedback. Only after that step does the graph generate its final answer.
 
-## Agent Workflow
+This is a research and planning assistant, not a booking service. It does not make reservations, handle payments, or guarantee prices, availability, visa eligibility, safety, or any recommendation.
 
-```
-Travel request
-      │
-      ▼
-Supervisor agent
-  ├─ Input guardrail  →  blocks off-topic / harmful requests
-  └─ Selects agents + extracts trip constraints
-      │
-      ├──► Flight agent   ──► AviationStack MCP
-      ├──► Hotel agent    ──► Tavily MCP
-      ├──► Weather agent  ──► Local OpenWeather MCP
-      └──► Budget agent   ──► LLM analysis
-      │
-      ▼
-Itinerary agent   (integrates all specialist results)
-      │
-      ▼
-Human approval  ◄──── interrupt() pauses graph here
-  ├─ Approved  ──►  Final agent (polish & format)
-  └─ Rejected  ──►  Final agent (apply feedback & revise)
-      │
-      ▼
-  Structured Markdown response
+## Workflow and architecture
+
+```text
+Browser → POST /api/travel → FastAPI → LangGraph supervisor
+                                          │
+                         guardrail + specialist selection
+                                          │
+   flight → hotel → weather → budget → itinerary draft → human review pause
+                                                             │
+                                              POST /api/travel/approve
+                                                             │
+                                                        final plan
 ```
 
-Each specialist agent is only invoked when the supervisor determines it is relevant. The `itinerary_agent` is always the final specialist stage.
+The supervisor can skip unnecessary specialists; `itinerary_agent` is always included. Chosen specialists run in a fixed sequence: flight, hotel, weather, budget, and itinerary.
 
----
-
-## Technology Stack
-
-| Layer | Technology |
-|---|---|
-| **Web framework** | FastAPI, Uvicorn, Jinja2 |
-| **Data validation** | Pydantic v2 |
-| **Agent orchestration** | LangGraph 1.2, LangChain 1.3 |
-| **Language model** | Groq (`openai/gpt-oss-120b` by default) via `langchain-groq` |
-| **MCP integration** | `langchain-mcp-adapters`, Tavily hosted MCP, AviationStack MCP (`uvx`), local FastMCP weather server |
-| **Weather data** | OpenWeather API (current + 5-entry forecast) |
-| **Flight data** | AviationStack API (airports, airlines) |
-| **Hotel research** | Tavily Search API |
-| **State persistence** | PostgreSQL, Psycopg 3, `langgraph-checkpoint-postgres` |
-| **Frontend** | Vanilla HTML5 / CSS3 / JavaScript, `marked.js`, `html2pdf.js` |
-| **Containerisation** | Docker (python:3.11-slim) |
-| **Testing** | pytest, unittest.mock |
-
----
-
-## Project Structure
-
+```text
+┌──────────────────────────────────────────────────────────────┐
+│ Browser: Jinja2 + vanilla JavaScript                           │
+│ Markdown rendering · copy · PDF export · localStorage          │
+└─────────────────────────┬────────────────────────────────────┘
+                          │ HTTP JSON
+┌─────────────────────────▼────────────────────────────────────┐
+│ FastAPI (app.py)                                               │
+│ GET / · GET /health · POST /api/travel · POST /api/travel/approve │
+└─────────────────────────┬────────────────────────────────────┘
+                          │
+┌─────────────────────────▼────────────────────────────────────┐
+│ LangGraph (backend.py)                                         │
+│ supervisor → optional specialists → itinerary → HITL → final  │
+└───────┬─────────────────────┬──────────────────────┬─────────┘
+        │                     │                      │
+ AviationStack MCP        Tavily MCP       Local Weather FastMCP
+    via uvx                (hosted)            → OpenWeather
+                          │
+                  PostgreSQL / PostgresSaver
+                  persisted checkpoints by thread_id
 ```
-TripWeaver-AI-Multi-Agent-Travel-Orchestration/
-│
-├── app.py                      # FastAPI app: routes, static files, Jinja2 setup
-├── backend.py                  # LangGraph workflow: TravelState, all agents, graph compilation,
-│                               #   PostgreSQL checkpointer, run/resume helpers
-├── mcp_client.py               # MCP client: Tavily, AviationStack, local Weather servers;
-│                               #   extract_destination() LLM helper
-├── custom_weather_mcp.py       # FastMCP server: get_current_weather(), get_forecast()
-│                               #   backed by OpenWeather REST API (stdio transport)
-│
-├── requirements.txt            # Python dependencies (pinned versions)
-├── Dockerfile                  # python:3.11-slim image, port 8000
-├── .env                        # API keys and DB URL (not committed)
-├── .gitignore
-├── .dockerignore
-├── LICENSE                     # MIT
-│
+
+### Human-in-the-loop lifecycle
+
+1. `POST /api/travel` starts a LangGraph thread or uses a supplied `thread_id`.
+2. `human_approval` calls LangGraph `interrupt()` after the draft itinerary is ready.
+3. The API returns `requires_approval: true`, the draft, and an approval request.
+4. `POST /api/travel/approve` resumes that exact thread with `approved` and optional feedback.
+5. The final agent polishes an approved draft or applies the requested revision.
+
+The browser stores its current thread ID as `travel_thread_id` in `localStorage`; PostgreSQL stores the graph checkpoint. Both must remain available for a paused workflow to resume.
+
+When a request states a duration such as `7 days`, `one week`, or `two weeks`, the itinerary prompts require a separate section for every requested day. Explicit durations from 1 through 30 days are recognised.
+
+## Agents and integrations
+
+| Component | Responsibility | Dependency | What happens if it fails |
+|---|---|---|---|
+| Input guardrail | Allows travel-related requests and blocks clearly unrelated, harmful, or illegal ones | Groq | Fails open on model/JSON parsing errors. |
+| Supervisor | Selects specialists; extracts destination, origin, duration, budget, style, preferences | Groq | Selects all specialists as a fallback. |
+| Flight agent | Airport/airline context, likely routes, duration, estimates, booking advice | AviationStack MCP through `uvx` | Returns an unavailable message; workflow continues. |
+| Hotel agent | Accommodation and neighbourhood research | Tavily hosted MCP | Provides clearly-labelled non-live advice. |
+| Weather agent | Current conditions and forecast | Local FastMCP + OpenWeather | Provides general seasonal guidance. |
+| Budget agent | Cost categories, risks, savings ideas, feasibility | Groq | An unhandled model error reaches the API. |
+| Itinerary agent | Detailed draft plan | Groq | An unhandled model error reaches the API. |
+| Final agent | Polishes or revises the itinerary after review | Groq | An unhandled model error reaches the API. |
+
+The weather MCP server exposes `get_current_weather(city)` and `get_forecast(city)`. The forecast is the first five three-hour OpenWeather forecast entries, not a full multi-day forecast.
+
+## Guardrails
+
+Every new request first passes through an LLM-based input guardrail before the supervisor selects specialist agents. The guardrail permits travel-planning and travel-information requests, including questions about destinations, flights, accommodation, weather, budgets, visas, transport, sightseeing, food, packing, and itineraries. It blocks requests that are clearly unrelated to travel or that seek harmful or illegal instructions.
+
+When blocked, the graph ends immediately: no specialist agent, MCP integration, itinerary, or approval step runs. The API returns `guardrail_allowed: false`, a user-facing `guardrail_reason`, an empty `selected_agents` list, and the reason as `answer`.
+
+The guardrail is intentionally designed to fail open if the model call or strict-JSON parsing fails, so a temporary model-format problem does not make the travel planner unusable. This is a usability fallback, not a production safety boundary. Internet-facing deployments should add deterministic server-side validation, authentication, rate limiting, logging, and policy enforcement appropriate to their use case.
+
+## Repository layout
+
+```text
+.
+├── app.py                    # FastAPI app, routes, static files, templates
+├── backend.py                # State, agents, LangGraph graph, Postgres persistence
+├── mcp_client.py             # Tavily, AviationStack, Weather MCP client helpers
+├── custom_weather_mcp.py     # Local stdio FastMCP server for OpenWeather
+├── requirements.txt          # Pinned runtime dependencies
+├── Dockerfile                # Python 3.11 container image
 ├── static/
-│   ├── script.js               # API client, thread persistence (localStorage),
-│   │                           #   Markdown rendering, copy-to-clipboard, PDF export
-│   └── style.css               # Responsive dark-theme UI (Inter font, radial gradients)
-│
-├── templates/
-│   └── index.html              # Single-page frontend: textarea, quick-prompt chips,
-│                               #   result section, error box, Markdown/PDF libraries
-│
-└── tests/
-    ├── test_api.py             # FastAPI route tests, Pydantic model tests, static asset tests
-    ├── test_backend_units.py   # Backend helper, routing logic, guardrail/supervisor, DB config
-    └── test_weather_and_utils.py  # Weather MCP, MCP client utils, project structure tests
+│   ├── script.js             # API/approval UX, markdown, copy, PDF download
+│   └── style.css             # Responsive visual design
+├── templates/index.html      # Single-page browser UI
+├── tests/
+│   ├── test_api.py           # Routes, models, template/assets tests
+│   ├── test_backend_units.py # Agent/routing/helper tests
+│   └── test_weather_and_utils.py # Weather MCP and MCP utility tests
+└── output/pdf/               # Project-report artifact
 ```
 
-> **Note:** The `__pycache__` directory is auto-generated and excluded from version control.
+## Prerequisites
 
----
-
-## Getting Started
-
-### Prerequisites
-
-| Requirement | Notes |
+| Requirement | Purpose |
 |---|---|
-| **Python 3.11+** | 3.12 or 3.14 also confirmed working |
-| **PostgreSQL** | Any reachable instance (local, Render, Supabase, etc.) |
-| **[uv](https://docs.astral.sh/uv/)** | Required for launching the AviationStack MCP server via `uvx` |
-| **Groq API key** | [console.groq.com](https://console.groq.com/) |
-| **Tavily API key** | [tavily.com](https://tavily.com/) |
-| **AviationStack API key** | [aviationstack.com](https://aviationstack.com/) |
-| **OpenWeather API key** | [openweathermap.org](https://openweathermap.org/api) |
+| Python 3.11+ | Supported runtime; Docker uses Python 3.11. |
+| PostgreSQL | Mandatory LangGraph checkpoint store. |
+| Groq API key | Mandatory at backend import/startup. |
+| `uv` / `uvx` | Required only for AviationStack flight research. |
+| Tavily API key | Required when hotel research runs. |
+| AviationStack API key | Required when flight research runs. |
+| OpenWeather API key | Required when weather research runs. |
 
-### Installation
+Get keys from [Groq](https://console.groq.com/), [Tavily](https://tavily.com/), [AviationStack](https://aviationstack.com/), and [OpenWeather](https://openweathermap.org/api). Install `uv` using the [official guide](https://docs.astral.sh/uv/getting-started/installation/) if flight MCP support is needed.
+
+## Install and configure
 
 ```powershell
-# 1. Clone the repository
 git clone https://github.com/preetham789/TripWeaver-AI-Multi-Agent-Travel-Orchestration.git
 cd TripWeaver-AI-Multi-Agent-Travel-Orchestration
 
-# 2. Create and activate a virtual environment
 python -m venv .venv
-.\.venv\Scripts\Activate.ps1   # Windows PowerShell
-# source .venv/bin/activate    # macOS / Linux
-
-# 3. Install dependencies
+.\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-
-# 4. Create your .env file (see Configuration below)
 ```
 
-### Configuration
+On macOS/Linux, activate the environment with `source .venv/bin/activate`.
 
-Create a `.env` file in the project root:
+Create a `.env` file in the repository root. It is ignored by Git—never commit it.
 
 ```env
-# ── Required ──────────────────────────────────────────────────────────────────
-GROQ_API_KEY=gsk_...
-DATABASE_URL=postgresql://username:password@host:5432/database
+# Required at application startup
+GROQ_API_KEY=gsk_your_key
+DATABASE_URL=postgresql://USER:PASSWORD@HOST:5432/DATABASE
 
-# ── Required for specialist agents ───────────────────────────────────────────
-TAVILY_API_KEY=tvly-...
-AVIATIONSTACK_API_KEY=...
-OPENWEATHER_API_KEY=...
+# Required only when their specialist is selected
+TAVILY_API_KEY=tvly_your_key
+AVIATION_STACK_API_KEY=your_aviationstack_key
+OPENWEATHER_API_KEY=your_openweather_key
 
-# ── Optional ──────────────────────────────────────────────────────────────────
-GROQ_MODEL=openai/gpt-oss-120b        # Override the default model
-LANGSMITH_TRACING=true                 # Enable LangSmith tracing
-LANGSMITH_API_KEY=lsv2_...
-LANGSMITH_PROJECT=TripWeaver-AI
+# Optional; default: openai/gpt-oss-120b
+GROQ_MODEL=openai/gpt-oss-120b
 ```
 
-| Variable | Required | Purpose |
-|---|---|---|
-| `GROQ_API_KEY` | ✅ Yes | Groq LLM authentication — validated at startup |
-| `DATABASE_URL` | ✅ Yes | PostgreSQL connection for LangGraph checkpointing; `sslmode=require` appended automatically if absent |
-| `TAVILY_API_KEY` | For hotel research | Passed to Tavily's hosted MCP endpoint |
-| `AVIATIONSTACK_API_KEY` | For flight research | Passed to the AviationStack MCP subprocess |
-| `OPENWEATHER_API_KEY` | For weather data | Used by `custom_weather_mcp.py` |
-| `GROQ_MODEL` | No | Defaults to `openai/gpt-oss-120b` |
-| `LANGSMITH_*` | No | Optional observability with LangSmith |
+`AVIATIONSTACK_API_KEY` is accepted for compatibility, but `AVIATION_STACK_API_KEY` is preferred. If `DATABASE_URL` has no `sslmode` parameter, the backend appends `sslmode=require`. Startup creates the LangGraph checkpoint tables through `checkpointer.setup()`.
 
-> ⚠️ Never commit `.env` to version control. It is already listed in `.gitignore`.
-
----
-
-## Running the Application
-
-### Local Development
+## Run and use the app
 
 ```powershell
-# Activate the virtual environment first
 .\.venv\Scripts\Activate.ps1
-
-# Start the development server with hot-reload
 uvicorn app:app --reload
 ```
 
-Open **[http://127.0.0.1:8000](http://127.0.0.1:8000)** in your browser.
+Open [http://127.0.0.1:8000](http://127.0.0.1:8000). FastAPI's generated API documentation is at [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs), and the lightweight health endpoint is [http://127.0.0.1:8000/health](http://127.0.0.1:8000/health).
 
-Health check endpoint: **[http://127.0.0.1:8000/health](http://127.0.0.1:8000/health)**
+In the UI:
 
-### Docker
+1. Enter a travel request or choose a sample prompt.
+2. Select **Generate Draft**; the workflow card shows guardrail status, routing rationale, and selected agents.
+3. Review the Markdown itinerary.
+4. Select **Approve & Generate Final**, or enter concrete feedback and select **Revise Using Feedback**.
+5. Copy the result or export it to PDF.
 
-```powershell
-# Build the image
-docker build -t tripweaver-ai .
+`Ctrl+Enter` submits the form. While a draft is awaiting review, the UI prevents starting a new request. Markdown rendering and PDF export use `marked.js` and `html2pdf.js` from public CDNs, so those browser features need CDN access.
 
-# Run with your environment file
-docker run --rm --env-file .env -p 8000:8000 tripweaver-ai
-```
-
-> **Note:** `uv` is not pre-installed in the Docker image. The AviationStack MCP flight research feature requires `uv` on the host `PATH`. Install it in the image or run the application outside Docker if you need flight data.
-
----
-
-## API Reference
+## API reference
 
 ### `GET /`
 
-Returns the single-page HTML frontend.
-
----
+Returns the single-page TripMate AI web application.
 
 ### `GET /health`
 
-Health check. Returns `200 OK` with:
+Returns a lightweight process health response; it does not test database or third-party connectivity.
 
 ```json
 {
@@ -316,129 +211,92 @@ Health check. Returns `200 OK` with:
 }
 ```
 
----
-
 ### `POST /api/travel`
 
-Start a new travel planning request.
-
-**Request body:**
+Starts the planning workflow, normally returning a draft awaiting approval.
 
 ```json
 {
-  "message": "Plan a 7-day Japan trip from India with flights, hotels, and sightseeing under ₹2 lakh.",
-  "thread_id": "user_abc123"
+  "message": "Plan a 5-day Dubai trip from Bengaluru with hotels and sightseeing.",
+  "thread_id": "user_optional_existing_thread"
 }
 ```
 
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `message` | string | ✅ Yes | Natural-language trip request. Blank or whitespace → `400 Bad Request`. |
-| `thread_id` | string | No | Existing checkpoint thread to continue. A new `user_<uuid>` ID is generated if omitted. |
+| Field | Type | Required | Notes |
+|---|---|---:|---|
+| `message` | string | Yes | Whitespace-only input returns `400`. |
+| `thread_id` | string or null | No | Omit it to create `user_<uuid>`. |
 
-**Success response** (before human approval — `requires_approval: true`):
+A successful response contains `success`, `thread_id`, `answer`, `requires_approval`, `approval_request`, `itinerary`, `flight_results`, `hotel_results`, `weather_results`, `budget_results`, `selected_agents`, `trip_constraints`, `supervisor_reasoning`, guardrail fields, review fields, and `llm_calls`.
 
-```json
-{
-  "success": true,
-  "thread_id": "user_abc123",
-  "answer": "## Day 1 — Arrival in Tokyo\n...",
-  "requires_approval": true,
-  "approval_request": "Please review the draft itinerary...",
-  "flight_results": "...",
-  "hotel_results": "...",
-  "weather_results": "...",
-  "budget_results": "...",
-  "itinerary": "...",
-  "selected_agents": ["flight_agent", "hotel_agent", "weather_agent", "budget_agent", "itinerary_agent"],
-  "trip_constraints": { "destination": "Japan", "origin": "India", "duration": "7 days", "budget": "2 lakhs", "travel_style": "", "special_preferences": [] },
-  "supervisor_reasoning": "...",
-  "guardrail_allowed": true,
-  "guardrail_reason": "",
-  "approved": null,
-  "human_feedback": "",
-  "llm_calls": 6
-}
-```
-
-**Error responses:**
-
-| Status | Condition |
-|---|---|
-| `400` | Empty or whitespace-only message |
-| `422` | Missing `message` field (Pydantic validation) |
-| `500` | Internal error (DB connection failure, LLM error, etc.) |
-
----
+For a normal draft, `requires_approval` is `true`; `answer` and `itinerary` contain the draft. A blocked request completes directly, with its explanation in `answer`.
 
 ### `POST /api/travel/approve`
 
-Resume a paused workflow after human review.
-
-**Request body:**
+Resumes a paused workflow.
 
 ```json
 {
-  "thread_id": "user_abc123",
-  "approved": true,
-  "feedback": ""
+  "thread_id": "user_existing_thread",
+  "approved": false,
+  "feedback": "Keep the budget under ₹1.5 lakh and add vegetarian food options."
 }
 ```
 
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `thread_id` | string | ✅ Yes | Must be non-empty (min length 1). |
-| `approved` | boolean | ✅ Yes | `true` to approve the draft; `false` to request a revision. |
-| `feedback` | string | When rejecting | Required and non-whitespace when `approved` is `false`. |
+| Field | Type | Required | Notes |
+|---|---|---:|---|
+| `thread_id` | string | Yes | Must be non-empty. |
+| `approved` | boolean | Yes | `true` polishes the plan; `false` revises it. |
+| `feedback` | string | Conditional | Non-whitespace text is required when `approved` is `false`. |
 
-**Error responses:**
+It returns the same result shape as the initial endpoint, now with a final `answer` and `requires_approval: false`.
 
-| Status | Condition |
-|---|---|
-| `400` | `approved: false` with empty or whitespace-only `feedback` |
-| `422` | Missing `thread_id` or `approved`, or empty `thread_id` |
-| `500` | Thread not found, DB error, or LLM error |
+### Errors
 
----
+| Status | Meaning |
+|---:|---|
+| `400` | Empty request or a rejected draft with no feedback. |
+| `422` | Request schema validation failed. |
+| `500` | An unhandled backend, persistence, MCP, or model error occurred. |
 
 ## Testing
 
-The test suite has **177 tests** covering all aspects of the application. No real API calls or database connections are made — all external services are mocked.
+The repository currently contains **187 tests**. They mock external services; they are not intended to make live API or database calls.
 
 ```powershell
-# Install test dependencies (first time only)
 pip install pytest
 
-# Run the full test suite
-# (run test_backend_units first to avoid sys.modules conflicts with the API stub)
-.venv\Scripts\python.exe -m pytest tests\test_backend_units.py tests\test_weather_and_utils.py tests\test_api.py -v
+# Keep test_api.py last: it inserts a backend stub for endpoint tests.
+.\.venv\Scripts\python.exe -m pytest `
+  tests\test_backend_units.py `
+  tests\test_weather_and_utils.py `
+  tests\test_api.py -v
+
+.\.venv\Scripts\python.exe -m py_compile `
+  app.py backend.py mcp_client.py custom_weather_mcp.py
 ```
 
-| Test File | Tests | What it covers |
-|---|---|---|
-| `tests/test_backend_units.py` | 62 | Helper functions, LangGraph routing, supervisor/guardrail (mocked LLM), result serialisation, agent registry, DB config |
-| `tests/test_weather_and_utils.py` | 53 | Weather MCP (API key, HTTP errors, current weather, forecast), MCP client utilities, project structure |
-| `tests/test_api.py` | 62 | All FastAPI endpoints, Pydantic model validation, static asset integrity, edge cases |
-
-**Syntax check (no network calls):**
+## Docker
 
 ```powershell
-python -m py_compile app.py backend.py mcp_client.py custom_weather_mcp.py
+docker build -t tripweaver-ai .
+docker run --rm --env-file .env -p 8000:8000 tripweaver-ai
 ```
 
----
+The image installs Python dependencies and serves Uvicorn on port 8000, but it does **not** install `uv`/`uvx`. AviationStack flight MCP calls will therefore fail in the stock container while the rest of the workflow can continue. Install `uv` in the image before relying on flight research in Docker. The container also needs network access to PostgreSQL and all selected providers.
 
-## Known Limitations
+## Operational notes and limitations
 
-- **Booking**: TripWeaver AI provides planning guidance only. It does not book flights, hotels, or any services, process payments, or guarantee availability.
-- **Pricing accuracy**: AviationStack MCP returns airport and airline context but not live ticket prices. Treat all price estimates as approximate.
-- **AviationStack plan**: Some AviationStack MCP tools, including airport and airline lookups, may be unavailable on the current subscription plan. Flight guidance can still be generated, but those lookups require a plan that grants access.
-- **Docker & uv**: The current Dockerfile does not install `uv`. AviationStack MCP (flight research) will be unavailable when running inside the container unless `uv` is added to the image.
-- **External API availability**: A failing MCP integration (Tavily, AviationStack, or OpenWeather) causes only that specialist agent to degrade gracefully — the rest of the pipeline continues.
-- **Fact accuracy**: Visa requirements, opening hours, safety conditions, and prices change frequently. Always verify with official sources before travel.
-
----
+- The backend loads `.env` and connects to PostgreSQL at import time. Missing `GROQ_API_KEY` or `DATABASE_URL` prevents startup.
+- Store API keys and database credentials in environment or secret management, not in source control. Use a managed database, HTTPS, logging, rate limiting, authentication, and user isolation before exposing this app publicly.
+- The default model is `openai/gpt-oss-120b`. Set `GROQ_MODEL` only to a model supported by your Groq account.
+- The AviationStack client calls `list_airports` and `list_airlines`; availability depends on the MCP server and your AviationStack plan. It does not provide guaranteed live ticket pricing.
+- Flight, hotel, and weather failures are designed to degrade gracefully, but all generated advice remains advisory and may be stale or incomplete.
+- The model-driven guardrail intentionally fails open when it cannot parse its own result. It is not sufficient as a sole production safety control.
+- The project has no booking workflow, payments, authentication, rate limits, availability guarantee, or formal user-data isolation.
+- `thread_id` identifies persisted planning state. Treat it as sensitive application state and do not expose predictable IDs in a multi-user deployment.
+- Verify visas, local laws, opening hours, schedules, prices, safety, and health requirements with official sources before travelling.
 
 ## License
 
-Copyright © 2026 Preetham P. Distributed under the [MIT License](LICENSE)..
+Copyright © 2026 Preetham P. Released under the [MIT License](LICENSE).
