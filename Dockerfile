@@ -14,7 +14,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir --prefix=/install -r requirements.txt
+    pip install --no-cache-dir --prefix=/install uv -r requirements.txt
 
 
 # ── Stage 2: Minimal Production Runtime ──────────────────────────────────────
@@ -24,15 +24,14 @@ WORKDIR /app
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PATH="/root/.cargo/bin:/install/bin:${PATH}" \
     ENVIRONMENT=production \
     PORT=8000
 
-# Install runtime tools: curl for healthchecks and uv for AviationStack MCP
+# Install runtime utilities: curl for healthchecks and pip-installed uv
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     ca-certificates \
-    && curl -LsSf https://astral.sh/uv/install.sh | sh \
+    && pip install --no-cache-dir uv \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy installed Python packages from builder

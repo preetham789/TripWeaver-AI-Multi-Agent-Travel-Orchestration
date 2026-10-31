@@ -30,7 +30,7 @@ AVIATION_STACK_API_KEY = (
 
 OPENWEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
+GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 
 WEATHER_SERVER_PATH = BASE_DIR / "custom_weather_mcp.py"
 UVX_COMMAND = shutil.which("uvx") or "uvx"

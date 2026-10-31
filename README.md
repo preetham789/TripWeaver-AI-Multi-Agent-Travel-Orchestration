@@ -5,18 +5,29 @@
 
 The repository is called **TripWeaver AI**; the web UI is branded **TripMate AI**.
 
+[![CI/CD Pipeline](https://github.com/preetham789/TripWeaver-AI-Multi-Agent-Travel-Orchestration/actions/workflows/ci.yml/badge.svg)](https://github.com/preetham789/TripWeaver-AI-Multi-Agent-Travel-Orchestration/actions/workflows/ci.yml)
+[![Tests Passing](https://img.shields.io/badge/Tests-208%20Passed-22C55E?logo=pytest&logoColor=white)](tests/)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](https://python.org)
 [![FastAPI 0.136](https://img.shields.io/badge/FastAPI-0.136-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![LangGraph 1.2](https://img.shields.io/badge/LangGraph-1.2-1C3C3C)](https://langchain-ai.github.io/langgraph/)
 [![Docker Multi-Stage](https://img.shields.io/badge/Docker-Multi--Stage-2496ED?logo=docker&logoColor=white)](Dockerfile)
-[![CI/CD](https://img.shields.io/badge/CI%2FCD-GitHub%20Actions-2088FF?logo=githubactions&logoColor=white)](.github/workflows/ci.yml)
-[![Tests Passing](https://img.shields.io/badge/Tests-208%20Passed-22C55E?logo=pytest&logoColor=white)](tests/)
 [![License MIT](https://img.shields.io/badge/License-MIT-green)](LICENSE)
+
+---
+
+## 🖥️ Live Demo & Application Preview
+
+> 🌐 **Live Web Application:** [https://tripmate-ai.onrender.com](https://tripmate-ai.onrender.com)  
+> 📑 **Interactive OpenAPI Swagger Docs:** [https://tripmate-ai.onrender.com/docs](https://tripmate-ai.onrender.com/docs)  
+> 🚀 **One-Click Deployment:** [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/preetham789/TripWeaver-AI-Multi-Agent-Travel-Orchestration)
+
+![TripMate AI Application Demo](docs/demo.png)
 
 ---
 
 ## Table of Contents
 
+- [Live Demo & Application Preview](#️-live-demo--application-preview)
 - [Enterprise Highlights](#enterprise-highlights)
 - [System Architecture](#system-architecture)
 - [Agent Pipeline & Governance](#agent-pipeline--governance)
@@ -39,13 +50,13 @@ The repository is called **TripWeaver AI**; the web UI is branded **TripMate AI*
 | Dimension | Enterprise Capability |
 |---|---|
 | **Orchestration Engine** | Stateful, resumable directed acyclic graph (DAG) powered by **LangGraph 1.2** with dynamic supervisor routing. |
-| **High Availability State** | **PostgreSQL** persistence via `PostgresSaver` with automatic connection recovery and offline in-memory fallback. |
+| **High Availability State** | **PostgreSQL** persistence via `PostgresSaver` with automatic connection recovery and offline in-memory fallback (`MemorySaver`). |
 | **Human-in-the-Loop (HITL)** | Built-in `interrupt()` governance with interactive frontend draft review, revision feedback, and approval dispatching. |
 | **Tool Integration (MCP)** | Decoupled Model Context Protocol clients for AviationStack (flights via `uvx`), Tavily (hotels), and FastMCP (weather). |
 | **Security Hardening** | Sliding-window IP rate limiter, OWASP security headers (HSTS, CSP, nosniff, DENY), heuristic prompt-injection guardrails, and request sanitization. |
 | **Observability** | Correlation IDs (`X-Request-ID`), process timing headers (`X-Process-Time-Ms`), structured logging, operational telemetry (`/api/metrics`), and Kubernetes probes (`/health/live`, `/health/ready`). |
 | **Container Hardening** | Non-root container (`appuser`, UID 10001), multi-stage Docker build, embedded `uv` toolchain, Docker Compose stack (`app`, `postgres:16`, `redis:7`). |
-| **Quality Assurance** | Comprehensive test coverage across **208 automated tests** passing in ~5 seconds. |
+| **Quality Assurance** | Comprehensive test coverage across **208 automated tests** passing in ~5 seconds with green CI/CD badge. |
 
 ---
 
@@ -104,7 +115,7 @@ The repository is called **TripWeaver AI**; the web UI is branded **TripMate AI*
    - Selects which specialist agents to activate, bypassing unnecessary tools.
 2. **Flight Specialist**: Queries airport coordinates and carrier networks via the AviationStack MCP subprocess.
 3. **Hotel Specialist**: Discovers top-rated accommodations and neighborhood recommendations via Tavily MCP.
-4. **Weather Specialist**: Connects to the local FastMCP server to retrieve current metrics and 5-entry forecasts via OpenWeather.
+4. **Weather Specialist**: Connects to the local FastMCP server (`custom_weather_mcp.py`) to retrieve current metrics and 5-entry forecasts via OpenWeather.
 5. **Budget Specialist**: Performs cost viability assessments, identifies budget risks, and suggests practical savings.
 6. **Itinerary Synthesis Agent**: Collates all specialist findings into a unified, day-by-day itinerary draft.
 7. **Human Approval Gateway**: Halts graph execution using LangGraph's `interrupt()`, awaiting client approval or revision feedback.
@@ -167,9 +178,13 @@ TripWeaver-AI-Multi-Agent-Travel-Orchestration/
 ├── templates/
 │   └── index.html                  # Single-page UI with approval drawer & action chips
 │
-├── Dockerfile                      # Production multi-stage Docker build (non-root appuser)
+├── docs/                           # Documentation & Visual Assets
+│   └── demo.png                    # High-resolution application preview screenshot
+│
+├── Dockerfile                      # Production multi-stage Docker build (uv included, non-root appuser)
 ├── docker-compose.yml              # Multi-container stack (App + PostgreSQL + Redis)
 ├── requirements.txt                # Pinned production Python dependencies
+├── .env.example                    # Version-controlled environment variables template
 ├── .github/workflows/ci.yml        # GitHub Actions automated test & build pipeline
 │
 └── tests/                          # Automated Pytest Suite (208 tests)
@@ -185,14 +200,18 @@ TripWeaver-AI-Multi-Agent-Travel-Orchestration/
 
 - **Python**: 3.11, 3.12, or 3.14
 - **PostgreSQL**: Version 14+ (Local, Render, Supabase, Neon, or Docker)
-- **UV Toolchain**: Required for AviationStack MCP (`curl -LsSf https://astral.sh/uv/install.sh | sh`)
+- **UV Toolchain**: Pre-configured in Docker image or locally via `pip install uv`
 - **API Keys**:
   - `GROQ_API_KEY`: Fast LLM inference ([console.groq.com](https://console.groq.com))
   - `TAVILY_API_KEY`: Real-time web search for hotels ([tavily.com](https://tavily.com))
   - `AVIATIONSTACK_API_KEY`: Real-time aviation intelligence ([aviationstack.com](https://aviationstack.com))
   - `OPENWEATHER_API_KEY`: Weather forecasts ([openweathermap.org](https://openweathermap.org))
 
-Create a `.env` file in the project root:
+Copy `.env.example` to `.env` and supply your credentials:
+
+```bash
+cp .env.example .env
+```
 
 ```env
 # ── Core Database & LLM ───────────────────────────────────────────────────────
@@ -247,12 +266,9 @@ Starts the application, a persistent PostgreSQL database, and a Redis instance w
 docker compose up -d
 ```
 
-Check service status:
-```bash
-docker compose ps
-```
+### Standalone Production Docker Container
 
-### Standalone Docker Image
+The Dockerfile is hardened with a multi-stage build, non-root user (`appuser`), pip-installed `uv` toolchain, and container healthchecks:
 
 ```bash
 # Build production multi-stage image
