@@ -66,6 +66,33 @@ llm = ChatGroq(
     max_tokens=3000,
 )
 
+
+def _llm_invoke_with_retry(messages, max_retries: int = 4):
+    """Invoke LLM with exponential backoff on Groq 429 rate limit errors."""
+    import time
+    import re
+
+    fallback_delays = [15, 30, 60, 120]
+
+    for attempt in range(max_retries + 1):
+        try:
+            return llm.invoke(messages)
+        except Exception as exc:
+            err_str = str(exc)
+            is_rate_limit = "429" in err_str or "rate_limit_exceeded" in err_str
+
+            if not is_rate_limit or attempt == max_retries:
+                raise
+
+            match = re.search(r"try again in\s+([\d.]+)s", err_str, re.IGNORECASE)
+            if match:
+                wait = float(match.group(1)) + 2.0
+            else:
+                wait = fallback_delays[min(attempt, len(fallback_delays) - 1)]
+
+            print(f"[Rate limit] Groq 429 — waiting {wait:.1f}s before retry (attempt {attempt + 1}/{max_retries}) …")
+            time.sleep(wait)
+
 # =========================
 # State - original fields kept, new control fields added
 # =========================
@@ -116,8 +143,23 @@ AGENT_ORDER = [
 ]
 
 
+def _safe_async_run(coro):
+    """Safely execute an asynchronous coroutine from synchronous or worker threads."""
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+
+    if loop and loop.is_running():
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            return pool.submit(asyncio.run, coro).result()
+    else:
+        return asyncio.run(coro)
+
+
 def _llm_text(system_prompt: str, user_prompt: str) -> str:
-    response = llm.invoke(
+    response = _llm_invoke_with_retry(
         [
             SystemMessage(content=system_prompt),
             HumanMessage(content=user_prompt),
@@ -375,8 +417,8 @@ def flight_agent(state: TravelState):
     query = state["user_query"]
 
     try:
-        airports = asyncio.run(aviation_mcp_call("list_airports"))
-        airlines = asyncio.run(aviation_mcp_call("list_airlines"))
+        airports = _safe_async_run(aviation_mcp_call("list_airports"))
+        airlines = _safe_async_run(aviation_mcp_call("list_airlines"))
 
         print("\nAIRPORTS:", airports)
         print("\nAIRLINES:", airlines)
@@ -387,7 +429,7 @@ def flight_agent(state: TravelState):
             airline_data=_limit_context(airlines, 700),
         )
 
-        response = llm.invoke(
+        response = _llm_invoke_with_retry(
             [
                 SystemMessage(content="You are an expert travel flight planner."),
                 HumanMessage(content=prompt),
@@ -414,9 +456,7 @@ def hotel_agent(state: TravelState):
     )
 
     try:
-        hotel_results = asyncio.run(
-            tavily_mcp_search(query)
-        )
+        hotel_results = _safe_async_run(tavily_mcp_search(query))
 
     except Exception as exc:
         print(
@@ -775,13 +815,20 @@ graph.add_edge("guardrail_blocked", END)
 # PostgreSQL Checkpointer - original persistence kept
 # =========================
 DATABASE_URL = get_database_url()
-_conn = psycopg.connect(
-    DATABASE_URL,
-    autocommit=True,
-    row_factory=dict_row,
-)
-checkpointer = PostgresSaver(_conn)
-checkpointer.setup()
+try:
+    _conn = psycopg.connect(
+        DATABASE_URL,
+        autocommit=True,
+        row_factory=dict_row,
+    )
+    checkpointer = PostgresSaver(_conn)
+    checkpointer.setup()
+except Exception as _db_err:
+    from langgraph.checkpoint.memory import MemorySaver
+    _conn = None
+    checkpointer = MemorySaver()
+    if hasattr(checkpointer, "setup"):
+        checkpointer.setup()
 
 travel_graph = graph.compile(checkpointer=checkpointer)
 

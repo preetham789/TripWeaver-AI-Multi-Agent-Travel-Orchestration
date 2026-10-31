@@ -1,0 +1,81 @@
+version: "3.8"
+
+services:
+  # ── FastAPI Travel Orchestration Service ────────────────────────────────────
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: tripweaver-app
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - ENVIRONMENT=production
+      - HOST=0.0.0.0
+      - PORT=8000
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/tripweaver
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - GROQ_MODEL=${GROQ_MODEL:-llama-3.3-70b-versatile}
+      - TAVILY_API_KEY=${TAVILY_API_KEY}
+      - AVIATIONSTACK_API_KEY=${AVIATIONSTACK_API_KEY}
+      - OPENWEATHER_API_KEY=${OPENWEATHER_API_KEY}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - tripweaver-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health/live"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # ── PostgreSQL Checkpointer Database ───────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: tripweaver-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=tripweaver
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - tripweaver-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d tripweaver"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Redis Cache & Rate Limiting ───────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: tripweaver-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    networks:
+      - tripweaver-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+networks:
+  tripweaver-net:
+    driver: bridge
+
+volumes:
+  pgdata:
+  redisdata:
