@@ -15,10 +15,7 @@ The repository is called **TripWeaver AI**; the web UI is branded **TripMate AI*
 
 ---
 
-## 🖥️ Live Demo & Application Preview
-
-> 🌐 **Live Web Application:** [https://tripmate-ai.onrender.com](https://tripmate-ai.onrender.com)  
-> 📑 **Interactive OpenAPI Swagger Docs:** [https://tripmate-ai.onrender.com/docs](https://tripmate-ai.onrender.com/docs)  
+## Application Preview
 
 
 ![TripMate AI Application Demo](docs/demo.png)
@@ -27,7 +24,7 @@ The repository is called **TripWeaver AI**; the web UI is branded **TripMate AI*
 
 ## Table of Contents
 
-- [Live Demo & Application Preview](#️-live-demo--application-preview)
+- [Application Preview](#️application-preview)
 - [Enterprise Highlights](#enterprise-highlights)
 - [System Architecture](#system-architecture)
 - [Agent Pipeline & Governance](#agent-pipeline--governance)
