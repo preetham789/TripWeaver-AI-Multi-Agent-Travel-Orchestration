@@ -11,7 +11,21 @@ const AGENT_LABELS = {
 };
 
 function setPrompt(text) {
-  document.getElementById("userInput").value = text;
+  const input = document.getElementById("userInput");
+  input.value = text;
+  input.focus();
+}
+
+function appendFeedback(text) {
+  const feedbackInput = document.getElementById("approvalFeedback");
+  if (feedbackInput) {
+    if (feedbackInput.value.trim().length > 0) {
+      feedbackInput.value += " " + text;
+    } else {
+      feedbackInput.value = text;
+    }
+    feedbackInput.focus();
+  }
 }
 
 function setLoading(isLoading, mode = "draft") {
@@ -21,9 +35,9 @@ function setLoading(isLoading, mode = "draft") {
   const approveBtn = document.getElementById("approveBtn");
   const reviseBtn = document.getElementById("reviseBtn");
 
-  sendBtn.disabled = isLoading;
-  approveBtn.disabled = isLoading;
-  reviseBtn.disabled = isLoading;
+  if (sendBtn) sendBtn.disabled = isLoading;
+  if (approveBtn) approveBtn.disabled = isLoading;
+  if (reviseBtn) reviseBtn.disabled = isLoading;
 
   if (isLoading && mode === "draft") {
     btnText.classList.add("hidden");
@@ -66,16 +80,16 @@ function showWorkflow(data) {
 
   (data.selected_agents || []).forEach((agent) => {
     const chip = document.createElement("span");
-    chip.className = "agent-chip";
+    chip.className = "agent-chip " + agent.replace("_", "-");
     chip.textContent = AGENT_LABELS[agent] || agent;
     chips.appendChild(chip);
   });
 
   if (data.guardrail_allowed === false) {
-    guardrailBadge.textContent = "Guardrail blocked";
+    guardrailBadge.innerHTML = '<span class="guardrail-dot blocked"></span><span class="guardrail-label">Guardrail blocked</span>';
     guardrailBadge.classList.add("blocked");
   } else {
-    guardrailBadge.textContent = "Guardrail passed";
+    guardrailBadge.innerHTML = '<span class="guardrail-dot passed"></span><span class="guardrail-label">Guardrail passed</span>';
     guardrailBadge.classList.remove("blocked");
   }
 
@@ -90,7 +104,7 @@ function showResult(answer, isDraft = false) {
   const resultTitle = document.getElementById("resultTitle");
 
   renderMarkdown(resultBox, latestAnswerMarkdown);
-  resultTitle.textContent = isDraft ? "Draft Travel Plan" : "Your Final AI Travel Plan";
+  resultTitle.textContent = isDraft ? "Draft Travel Plan (Pending Review)" : "Your Final AI Travel Plan";
   resultSection.classList.remove("hidden");
 
   resultSection.scrollIntoView({
@@ -228,12 +242,15 @@ function copyResult() {
   navigator.clipboard.writeText(text)
     .then(() => {
       const copyBtn = document.querySelector(".copy-btn");
-      const oldText = copyBtn.textContent;
-      copyBtn.textContent = "Copied!";
+      const span = copyBtn.querySelector("span") || copyBtn;
+      const oldText = span.textContent;
+      span.textContent = "Copied!";
+      copyBtn.classList.add("copied");
 
       setTimeout(() => {
-        copyBtn.textContent = oldText;
-      }, 1400);
+        span.textContent = oldText;
+        copyBtn.classList.remove("copied");
+      }, 1600);
     })
     .catch(() => {
       showError("Could not copy result.");
@@ -249,12 +266,13 @@ function downloadPDF() {
   }
 
   const downloadBtn = document.querySelector(".download-btn");
-  const oldText = downloadBtn.textContent;
-  downloadBtn.textContent = "Preparing PDF...";
+  const span = downloadBtn.querySelector("span") || downloadBtn;
+  const oldText = span.textContent;
+  span.textContent = "Preparing PDF...";
   downloadBtn.disabled = true;
 
   const options = {
-    margin: 0.5,
+    margin: 0.6,
     filename: "ai-travel-plan.pdf",
     image: {
       type: "jpeg",
@@ -280,11 +298,11 @@ function downloadPDF() {
     .from(pdfContent)
     .save()
     .then(() => {
-      downloadBtn.textContent = oldText;
+      span.textContent = oldText;
       downloadBtn.disabled = false;
     })
     .catch(() => {
-      downloadBtn.textContent = oldText;
+      span.textContent = oldText;
       downloadBtn.disabled = false;
       showError("Could not download PDF.");
     });
