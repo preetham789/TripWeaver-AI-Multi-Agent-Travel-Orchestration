@@ -19,7 +19,7 @@ The repository is called **TripWeaver AI**; the web UI is branded **TripMate AI*
 
 > 🌐 **Live Web Application:** [https://tripmate-ai.onrender.com](https://tripmate-ai.onrender.com)  
 > 📑 **Interactive OpenAPI Swagger Docs:** [https://tripmate-ai.onrender.com/docs](https://tripmate-ai.onrender.com/docs)  
-> 🚀 **One-Click Deployment:** [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/preetham789/TripWeaver-AI-Multi-Agent-Travel-Orchestration)
+
 
 ![TripMate AI Application Demo](docs/demo.png)
 
