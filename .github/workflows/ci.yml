@@ -48,6 +48,10 @@ jobs:
           pip install -r requirements.txt
           pip install pytest pytest-asyncio httpx
 
+      - name: Create Environment File
+        run: |
+          cp .env.example .env
+
       - name: Syntax Compilation Check
         run: |
           python -m py_compile app.py backend.py mcp_client.py custom_weather_mcp.py

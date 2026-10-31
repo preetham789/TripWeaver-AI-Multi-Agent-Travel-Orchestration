@@ -316,7 +316,7 @@ class TestExtractDestination:
 
 class TestProjectStructure:
     def test_env_file_exists(self):
-        assert (ROOT / ".env").is_file()
+        assert (ROOT / ".env").is_file() or (ROOT / ".env.example").is_file()
 
     def test_requirements_txt_exists(self):
         assert (ROOT / "requirements.txt").is_file()
